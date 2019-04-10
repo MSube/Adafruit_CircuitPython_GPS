@@ -118,15 +118,13 @@ class GPS:
         Note you should NOT add the leading $ and trailing * to the command
         as they will automatically be added!
         """
-        self._uart.write(b'$')
-        self._uart.write(command)
+        checksum = b''
         if add_checksum:
             checksum = 0
             for char in command:
                 checksum ^= char
-            self._uart.write(b'*')
-            self._uart.write(bytes('{:02x}'.format(checksum).upper(), "ascii"))
-        self._uart.write(b'\r\n')
+            checksum = b'*{:02X}'.format(checksum)
+        self._uart.write(b'$' + command + checksum + b'\r\n')
 
     @property
     def has_fix(self):
@@ -145,25 +143,27 @@ class GPS:
         sentence = self._uart.readline()
         if sentence is None or sentence == b'' or len(sentence) < 1:
             return None
-        sentence = str(sentence, 'ascii').strip()
+        i = sentence.find(b'$')
+        if i < 0:
+            return None
+        sentence = sentence[i:].strip()
         # Look for a checksum and validate it if present.
-        if len(sentence) > 7 and sentence[-3] == '*':
+        if len(sentence) > 7 and sentence[-3] == b'*':
             # Get included checksum, then calculate it and compare.
-            expected = int(sentence[-2:], 16)
-            actual = 0
-            for i in range(1, len(sentence)-3):
-                actual ^= ord(sentence[i])
-            if actual != expected:
+            xsum = int(sentence[-2:], 16)
+            for b in sentence[1:-3]:
+                xsum ^= b
+            if xsum:
                 return None  # Failed to validate checksum.
             # Remove checksum once validated.
             sentence = sentence[:-3]
         # Parse out the type of sentence (first string after $ up to comma)
         # and then grab the rest as data within the sentence.
-        delineator = sentence.find(',')
+        delineator = sentence.find(b',')
         if delineator == -1:
             return None  # Invalid sentence, no comma after data type.
-        data_type = sentence[1:delineator]
-        return (data_type, sentence[delineator+1:])
+        data_type = str(sentence[1:delineator], 'ascii')
+        return (data_type, str(sentence[delineator+1:], 'ascii'))
 
     def _parse_gpgga(self, args):
         # Parse the arguments (everything after data type) for NMEA GPGGA
